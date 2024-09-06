@@ -1,7 +1,7 @@
 import os
 import sys
 import sqlite3  # Add this line
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QListWidget, QComboBox, QLabel, QSizePolicy, QListWidgetItem, QCheckBox, QCompleter, QStyle
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton, QListWidget, QComboBox, QLabel, QSizePolicy, QListWidgetItem, QCheckBox, QCompleter, QStyle, QStackedWidget, QTreeWidget, QTreeWidgetItem
 from PyQt6.QtGui import QPainter, QColor, QPen, QPixmap, QIcon
 from PyQt6.QtCore import Qt, QRect, QStringListModel, QSize
 
@@ -61,6 +61,7 @@ class GroceryTracker(QMainWindow):
         self.init_ui()
         self.init_db()
         self.setup_autocomplete()  # Add this line
+        self.current_view = 'normal'  # Add this line
 
     def create_plus_icon(self, size):
         pixmap = QPixmap(size)
@@ -152,30 +153,47 @@ class GroceryTracker(QMainWindow):
         button_layout.addWidget(recognize_button)
         button_layout.addWidget(remove_button)
 
-        # Remove the stacked widget and create a container for list and drawing
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
+        # Replace the existing container setup with this:
+        self.container = QWidget()
+        container_layout = QVBoxLayout(self.container)
         container_layout.setContentsMargins(0, 0, 0, 0)
 
+        self.stacked_widget = QStackedWidget()
         self.item_list = QListWidget()
         self.item_list.itemClicked.connect(self.populate_item_info)
         self.item_list.setStyleSheet("QListWidget::item { border-bottom: 1px solid #ddd; }")
 
+        self.category_tree = QTreeWidget()
+        self.category_tree.setHeaderHidden(True)
+        self.category_tree.itemClicked.connect(self.populate_item_info_from_tree)
+
+        self.location_tree = QTreeWidget()  # Add this line
+        self.location_tree.setHeaderHidden(True)  # Add this line
+        self.location_tree.itemClicked.connect(self.populate_item_info_from_tree)  # Add this line
+
+        self.stacked_widget.addWidget(self.item_list)
+        self.stacked_widget.addWidget(self.category_tree)
+        self.stacked_widget.addWidget(self.location_tree)  # Add this line
+
+        container_layout.addWidget(self.stacked_widget)
+
+        # Add toggle button
+        self.toggle_view_button = QPushButton("Toggle View")
+        self.toggle_view_button.clicked.connect(self.toggle_view)
+        button_layout.addWidget(self.toggle_view_button)
+
         self.drawing_widget = DrawingWidget()
 
-        # Add item_list to the container
-        container_layout.addWidget(self.item_list)
-
         # Set size policy to expand
-        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         # Add widgets to main layout
         layout.addLayout(input_layout)
         layout.addLayout(button_layout)
-        layout.addWidget(container)
+        layout.addWidget(self.container)
 
         # Set up the drawing widget to overlay the list
-        self.drawing_widget.setParent(container)
+        self.drawing_widget.setParent(self.container)
         self.drawing_widget.raise_()
 
         # Connect the name_input's textChanged signal to load_item_info
@@ -201,6 +219,85 @@ class GroceryTracker(QMainWindow):
         items = [row[0] for row in self.cursor.fetchall()]
         model = QStringListModel(items)
         self.completer.setModel(model)
+
+    def toggle_view(self):
+        if self.current_view == 'normal':
+            self.current_view = 'category'
+            self.stacked_widget.setCurrentWidget(self.category_tree)
+            self.update_category_tree()
+        elif self.current_view == 'category':
+            self.current_view = 'location'
+            self.stacked_widget.setCurrentWidget(self.location_tree)
+            self.update_location_tree()
+        else:
+            self.current_view = 'normal'
+            self.stacked_widget.setCurrentWidget(self.item_list)
+
+    def update_category_tree(self):
+        self.category_tree.clear()
+        categories = {}
+
+        for i in range(self.item_list.count()):
+            item = self.item_list.item(i)
+            widget = self.item_list.itemWidget(item)
+            if widget is None:
+                continue
+
+            label = widget.findChild(QLabel)
+            if label:
+                item_text = label.text()
+                name, details = item_text.split(' - ', 1)
+                quantity = details.split(', ')[0].split(': ')[1]
+                category = details.split(', ')[1].split(': ')[1]
+                location = details.split(', ')[2].split(': ')[1]
+
+                if category not in categories:
+                    categories[category] = []
+                categories[category].append(f"{name} - Qty: {quantity}, Location: {location}")
+
+        for category, items in categories.items():
+            category_item = QTreeWidgetItem(self.category_tree, [category])
+            category_item.setExpanded(True)
+            font = category_item.font(0)
+            font.setBold(True)
+            font.setPointSize(12)
+            category_item.setFont(0, font)
+
+            for item in items:
+                QTreeWidgetItem(category_item, [item])
+
+    def update_location_tree(self):
+        self.location_tree.clear()
+        locations = {}
+
+        for i in range(self.item_list.count()):
+            item = self.item_list.item(i)
+            widget = self.item_list.itemWidget(item)
+            if widget is None:
+                continue
+
+            label = widget.findChild(QLabel)
+            if label:
+                item_text = label.text()
+                name, details = item_text.split(' - ', 1)
+                quantity = details.split(', ')[0].split(': ')[1]
+                category = details.split(', ')[1].split(': ')[1]
+                location = details.split(', ')[2].split(': ')[1]
+
+                if location not in locations:
+                    locations[location] = []
+                locations[location].append(f"{name} - Qty: {quantity}, Category: {category}")
+
+        for location, items in locations.items():
+            location_item = QTreeWidgetItem(self.location_tree, [location])
+            location_item.setExpanded(True)
+            font = location_item.font(0)
+            font.setBold(True)
+            font.setPointSize(12)
+            location_item.setFont(0, font)
+
+            for item in items:
+                QTreeWidgetItem(location_item, [item])
 
     def add_item(self):
         name = self.name_input.text()
@@ -250,6 +347,8 @@ class GroceryTracker(QMainWindow):
             self.drawing_widget.clear()
 
             self.update_autocomplete_list()  # Add this line
+            self.update_category_tree()  # Add this line
+            self.update_location_tree()  # Add this line
 
     def checkbox_state_changed(self, state, item):
         if state == Qt.CheckState.Checked.value:
@@ -315,7 +414,7 @@ class GroceryTracker(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         if hasattr(self, 'drawing_widget'):
-            list_rect = self.item_list.geometry()
+            list_rect = self.stacked_widget.geometry()
             checkbox_width = 30  # Adjust this value based on your checkbox width
             self.drawing_widget.setGeometry(list_rect.x(), list_rect.y(), 
                                             list_rect.width() - checkbox_width, list_rect.height())
@@ -349,6 +448,8 @@ class GroceryTracker(QMainWindow):
         
         self.conn.commit()
         self.update_autocomplete_list()  # Add this line
+        self.update_category_tree()  # Add this line
+        self.update_location_tree()  # Add this line
         self.clear_input_fields()
 
     def populate_item_info(self, item):
@@ -368,6 +469,33 @@ class GroceryTracker(QMainWindow):
         self.category_input.setCurrentText(category)
         self.location_input.setText(location)
         self.price_input.setText(price)
+
+    def populate_item_info_from_tree(self, item, column):
+        if item.parent() is None:
+            return  # This is a category or location item, not an actual grocery item
+
+        item_text = item.text(0)
+        name, details = item_text.split(' - ', 1)
+        quantity = details.split(', ')[0].split(': ')[1]
+
+        if self.current_view == 'category':
+            category = item.parent().text(0)
+            self.cursor.execute("SELECT location, price FROM items WHERE name = ?", (name,))
+            result = self.cursor.fetchone()
+            location, price = result if result else ("", "")
+        else:  # location view
+            category = details.split(', ')[1].split(': ')[1]
+            location = item.parent().text(0)
+            self.cursor.execute("SELECT price FROM items WHERE name = ?", (name,))
+            result = self.cursor.fetchone()
+            price = result[0] if result else ""
+
+        # Populate input fields
+        self.name_input.setText(name)
+        self.quantity_input.setText(quantity)
+        self.category_input.setCurrentText(category)
+        self.location_input.setText(location)
+        self.price_input.setText(str(price))
 
     def clear_input_fields(self):
         self.name_input.clear()
